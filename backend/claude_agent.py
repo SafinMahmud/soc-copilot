@@ -8,9 +8,20 @@ from prompts import (
     INVESTIGATION_SYSTEM,
     SPL_GENERATION_SYSTEM,
 )
+from typing import Optional
+
 from splunk_client import SplunkClient
 
-splunk = SplunkClient()
+_splunk_client: Optional[SplunkClient] = None
+
+
+def _get_splunk() -> SplunkClient:
+    global _splunk_client
+    if _splunk_client is None:
+        _splunk_client = SplunkClient()
+    return _splunk_client
+
+
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 INVESTIGATION_TOOLS = [
@@ -132,9 +143,9 @@ def run_investigation_agent(
 def execute_tool(tool_name: str, tool_input: dict, time_range: str = "-24h"):
     """Route tool calls to Splunk client."""
     if tool_name == "run_splunk_query":
-        return splunk.run_query(tool_input["spl"])
+        return _get_splunk().run_query(tool_input["spl"])
     if tool_name == "get_field_values":
-        return splunk.get_field_values(
+        return _get_splunk().get_field_values(
             tool_input["field"],
             tool_input["index"],
             time_range=time_range,

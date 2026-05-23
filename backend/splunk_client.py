@@ -1,8 +1,12 @@
 import os
+from pathlib import Path
 from typing import List
 
 import splunklib.client as splunk_client
 import splunklib.results as splunk_results
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
 class SplunkClient:
