@@ -1,6 +1,6 @@
 import type { InvestigationReport, SPLResult } from "./types";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
 export async function queryNaturalLanguage(
   message: string,
@@ -29,6 +29,18 @@ export async function investigateEntity(
       time_range: timeRange,
     }),
   });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export interface HealthResponse {
+  status: "ok";
+  ai_provider?: "gemini" | "mock" | string;
+  model?: string;
+}
+
+export async function getHealth(): Promise<HealthResponse> {
+  const res = await fetch(`${BASE_URL}/api/health`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

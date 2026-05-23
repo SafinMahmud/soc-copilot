@@ -31,7 +31,7 @@ User Browser
 │  POST /api/investigate          │
 │                                 │
 │  ┌──────────────────────────┐   │
-│  │ Claude Agent (tool_use)  │   │
+│  │ Gemini Agent Loop        │   │
 │  │                          │   │
 │  │  1. Plan queries         │   │──────────┐
 │  │  2. Run tool calls       │   │          │
@@ -40,11 +40,11 @@ User Browser
 │  │  5. Synthesize report    │   │          │
 │  └──────────────────────────┘   │          │
 └──────────┬──────────────────────┘          │
-           │ Anthropic API (HTTPS)            │
+           │ Google AI API (HTTPS)            │
            ▼                                  │
 ┌──────────────────────┐                      │
-│  Claude Sonnet API   │                      │
-│  (claude-sonnet-4)   │                      │
+│  Gemini API          │                      │
+│  (gemini-1.5-flash)  │                      │
 │                      │                      │
 │  - SPL generation    │                      │
 │  - Agent tool_use    │                      │
@@ -65,8 +65,8 @@ User Browser
 
 Data Flow — Investigation:
 User Input → detect entity → POST /investigate → agent loop starts →
-Claude decides query 1 → run_splunk_query tool → Splunk returns results →
-Claude interprets → decides query 2 → ... → up to 8 queries →
-Claude synthesizes raw findings → structured JSON report →
+Gemini decides query 1 → run_splunk_query tool → Splunk returns results →
+Gemini interprets → decides query 2 → ... → up to 8 queries →
+Gemini synthesizes raw findings → structured JSON report →
 Frontend renders: summary + timeline + MITRE cards + remediation
 ```

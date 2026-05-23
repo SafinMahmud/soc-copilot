@@ -18,7 +18,7 @@ See `architecture.md` for full data flow diagram.
 - Python 3.11+
 - Node.js 18+
 - Splunk Enterprise (free developer license)
-- Anthropic API key (pay-as-you-go)
+- Google Gemini API key (Google AI Studio free tier)
 
 ## Setup
 
@@ -35,10 +35,17 @@ See `architecture.md` for full data flow diagram.
 ```bash
 cd backend
 cp .env.example .env
-# Fill in your ANTHROPIC_API_KEY and Splunk credentials
+# Fill in AI_PROVIDER, GEMINI_API_KEY, and Splunk credentials
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --port 8001
 ```
+
+For local key setup instructions, create and read `backend/README_GEMINI_KEY.md`
+(this file is intentionally gitignored and local-only).
+
+Backend AI provider options:
+- `AI_PROVIDER=gemini` (default, best quality for final demo)
+- `AI_PROVIDER=mock` (fallback mode when Gemini quota is exhausted)
 
 ### 3. Frontend Setup
 

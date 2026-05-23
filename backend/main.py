@@ -8,7 +8,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from claude_agent import generate_spl, run_investigation_agent, synthesize_report
+from ai_agent import generate_spl, run_investigation_agent, synthesize_report
 from models import (
     InvestigateRequest,
     InvestigationReport,
@@ -32,7 +32,13 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    provider = os.getenv("AI_PROVIDER", "gemini").strip().lower()
+    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    return {
+        "status": "ok",
+        "ai_provider": provider,
+        "model": model if provider == "gemini" else "mock",
+    }
 
 
 @app.post("/api/query", response_model=SPLResult)
@@ -41,6 +47,23 @@ def natural_language_query(req: QueryRequest):
     try:
         spl = generate_spl(req.message, req.time_range, INDEX)
         results = splunk.run_query(spl)
+        provider = os.getenv("AI_PROVIDER", "gemini").strip().lower()
+        if (
+            provider == "mock"
+            and (not results or (isinstance(results[0], dict) and "error" not in results[0]))
+            and len(results) == 0
+        ):
+            fallback_spl = (
+                f"search (index={INDEX} OR index=main OR index=botsv3 OR index=_internal OR index=_audit) "
+                "earliest=-90d | head 100"
+            )
+            fallback_results = splunk.run_query(fallback_spl)
+            if fallback_results and not (
+                isinstance(fallback_results[0], dict)
+                and "error" in fallback_results[0]
+            ):
+                spl = fallback_spl
+                results = fallback_results
         if results and len(results) > 0 and "error" in results[0]:
             return SPLResult(
                 spl=spl,

@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ChatPanel } from "./components/ChatPanel";
 import { InvestigationReportView } from "./components/InvestigationReport";
 import { QueryResult } from "./components/QueryResult";
-import { investigateEntity, queryNaturalLanguage } from "@/lib/api";
+import { getHealth, investigateEntity, queryNaturalLanguage } from "@/lib/api";
 import { detectIntent } from "@/lib/detect-mode";
 import type {
   ChatMessage,
@@ -25,6 +25,8 @@ export default function Home() {
   const [inputMode, setInputMode] = useState<InputMode>("query");
   const [error, setError] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<"chat" | "report">("chat");
+  const [aiProvider, setAiProvider] = useState("gemini");
+  const [aiModel, setAiModel] = useState("gemini-2.0-flash");
 
   const addMessage = useCallback((msg: ChatMessage) => {
     setMessages((prev) => [...prev, msg]);
@@ -96,6 +98,19 @@ export default function Home() {
     void handleSend(text);
   };
 
+  useEffect(() => {
+    const loadHealth = async () => {
+      try {
+        const health = await getHealth();
+        if (health.ai_provider) setAiProvider(health.ai_provider);
+        if (health.model) setAiModel(health.model);
+      } catch {
+        // Keep defaults if health call fails.
+      }
+    };
+    void loadHealth();
+  }, []);
+
   return (
     <main className="flex h-screen flex-col">
       <div className="flex border-b border-soc-border lg:hidden">
@@ -130,6 +145,8 @@ export default function Home() {
             onSend={handleSend}
             isLoading={isLoading}
             inputMode={inputMode}
+            aiProvider={aiProvider}
+            aiModel={aiModel}
             onStarterClick={handleStarter}
           />
         </div>
