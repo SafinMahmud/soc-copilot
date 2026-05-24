@@ -336,6 +336,115 @@ def _run_mock_investigation_agent(
     return {"raw_findings": raw_findings, "queries_run": queries_run}
 
 
+def _deterministic_investigation_plan(
+    entity: str, entity_type: str, time_range: str, index: str
+) -> List[tuple]:
+    idx_filter = _mock_index_filter(index)
+    if entity_type == "ip":
+        return [
+            (
+                "Authentication failures tied to IP",
+                f'search {idx_filter} earliest={time_range} (src_ip="{entity}" OR src="{entity}" OR c_ip="{entity}") (EventCode=4625 OR action="failure" OR "failed login") | sort 0 - _time | head 200',
+                f'search {idx_filter} earliest=-90d (src_ip="{entity}" OR src="{entity}" OR c_ip="{entity}") ("failure" OR EventCode=4625 OR login OR auth) | sort 0 - _time | head 200',
+            ),
+            (
+                "Authentication successes tied to IP",
+                f'search {idx_filter} earliest={time_range} (src_ip="{entity}" OR src="{entity}" OR c_ip="{entity}") (EventCode=4624 OR action="success" OR "login succeeded") | sort 0 - _time | head 200',
+                f'search {idx_filter} earliest=-90d (src_ip="{entity}" OR src="{entity}" OR c_ip="{entity}") ("success" OR EventCode=4624 OR login OR auth) | sort 0 - _time | head 200',
+            ),
+            (
+                "Network activity involving IP",
+                f'search {idx_filter} earliest={time_range} (src_ip="{entity}" OR dest_ip="{entity}" OR c_ip="{entity}" OR src="{entity}") (stream OR tcp OR network OR dest_port OR bytes_in OR bytes_out) | sort 0 - _time | head 200',
+                f'search {idx_filter} earliest=-90d (src_ip="{entity}" OR dest_ip="{entity}" OR c_ip="{entity}" OR src="{entity}") (stream OR tcp OR network OR dest_port) | sort 0 - _time | head 200',
+            ),
+            (
+                "Audit trail actions from IP",
+                f'search index=_audit earliest={time_range} (src="{entity}" OR c_ip="{entity}" OR src_ip="{entity}") | stats count by user action info app | sort - count | head 100',
+                f'search index=_audit earliest=-90d (src="{entity}" OR c_ip="{entity}" OR src_ip="{entity}") | stats count by user action info app | sort - count | head 100',
+            ),
+            (
+                "Recent raw events for entity evidence",
+                f'search {idx_filter} earliest={time_range} ("{entity}") | table _time host source sourcetype user action src src_ip c_ip dest_ip EventCode bytes_in bytes_out | sort 0 - _time | head 120',
+                f'search {idx_filter} earliest=-90d ("{entity}") | table _time host source sourcetype user action src src_ip c_ip dest_ip EventCode bytes_in bytes_out | sort 0 - _time | head 120',
+            ),
+        ]
+    if entity_type == "user":
+        return [
+            (
+                "Authentication activity for user",
+                f'search {idx_filter} earliest={time_range} (user="{entity}" OR account="{entity}") (login OR auth OR EventCode=*) | sort 0 - _time | head 200',
+                f'search {idx_filter} earliest=-90d (user="{entity}" OR account="{entity}") (login OR auth OR EventCode=*) | sort 0 - _time | head 200',
+            ),
+            (
+                "Failed authentication for user",
+                f'search {idx_filter} earliest={time_range} (user="{entity}" OR account="{entity}") (EventCode=4625 OR action="failure" OR "failed login") | sort 0 - _time | head 200',
+                f'search {idx_filter} earliest=-90d (user="{entity}" OR account="{entity}") ("failure" OR EventCode=4625 OR auth) | sort 0 - _time | head 200',
+            ),
+            (
+                "Successful authentication for user",
+                f'search {idx_filter} earliest={time_range} (user="{entity}" OR account="{entity}") (EventCode=4624 OR action="success") | sort 0 - _time | head 200',
+                f'search {idx_filter} earliest=-90d (user="{entity}" OR account="{entity}") ("success" OR EventCode=4624 OR auth) | sort 0 - _time | head 200',
+            ),
+            (
+                "User activity from audit logs",
+                f'search index=_audit earliest={time_range} user="{entity}" | stats count by action info app src c_ip | sort - count | head 100',
+                f'search index=_audit earliest=-90d user="{entity}" | stats count by action info app src c_ip | sort - count | head 100',
+            ),
+            (
+                "Recent raw events for user evidence",
+                f'search {idx_filter} earliest={time_range} (user="{entity}" OR account="{entity}") | table _time host source sourcetype user action src src_ip c_ip dest_ip EventCode | sort 0 - _time | head 120',
+                f'search {idx_filter} earliest=-90d (user="{entity}" OR account="{entity}") | table _time host source sourcetype user action src src_ip c_ip dest_ip EventCode | sort 0 - _time | head 120',
+            ),
+        ]
+    return [
+        (
+            "Host security events",
+            f'search {idx_filter} earliest={time_range} (host="{entity}" OR dest="{entity}") (EventCode=* OR auth OR process OR network) | sort 0 - _time | head 200',
+            f'search {idx_filter} earliest=-90d (host="{entity}" OR dest="{entity}") (EventCode=* OR auth OR process OR network) | sort 0 - _time | head 200',
+        ),
+        (
+            "Host authentication failures",
+            f'search {idx_filter} earliest={time_range} (host="{entity}" OR dest="{entity}") (EventCode=4625 OR action="failure" OR "failed login") | sort 0 - _time | head 200',
+            f'search {idx_filter} earliest=-90d (host="{entity}" OR dest="{entity}") ("failure" OR EventCode=4625 OR auth) | sort 0 - _time | head 200',
+        ),
+        (
+            "Host process and command activity",
+            f'search {idx_filter} earliest={time_range} host="{entity}" (process OR command OR cmdline OR powershell OR exec) | sort 0 - _time | head 200',
+            f'search {idx_filter} earliest=-90d host="{entity}" (process OR command OR cmdline OR powershell OR exec) | sort 0 - _time | head 200',
+        ),
+        (
+            "Host network activity",
+            f'search {idx_filter} earliest={time_range} (host="{entity}" OR dest="{entity}") (stream OR tcp OR network OR dest_port OR bytes_in OR bytes_out) | sort 0 - _time | head 200',
+            f'search {idx_filter} earliest=-90d (host="{entity}" OR dest="{entity}") (stream OR tcp OR network OR dest_port) | sort 0 - _time | head 200',
+        ),
+        (
+            "Recent raw events for host evidence",
+            f'search {idx_filter} earliest={time_range} (host="{entity}" OR dest="{entity}") | table _time host source sourcetype user action src src_ip c_ip dest_ip EventCode process command | sort 0 - _time | head 120',
+            f'search {idx_filter} earliest=-90d (host="{entity}" OR dest="{entity}") | table _time host source sourcetype user action src src_ip c_ip dest_ip EventCode process command | sort 0 - _time | head 120',
+        ),
+    ]
+
+
+def _run_deterministic_investigation_agent(
+    entity: str, entity_type: str, time_range: str, index: str
+) -> Dict[str, Any]:
+    planned_queries = _deterministic_investigation_plan(
+        entity=entity,
+        entity_type=entity_type,
+        time_range=time_range,
+        index=index,
+    )
+    raw_findings: Dict[str, Any] = {}
+    queries_run: List[str] = []
+    for i, (description, strict_spl, broad_spl) in enumerate(
+        planned_queries[:MAX_TOOL_CALLS], start=1
+    ):
+        query_out = _run_query_with_fallbacks(description, strict_spl, broad_spl)
+        raw_findings[f"query_{i}"] = {**query_out}
+        queries_run.append(query_out["spl"])
+    return {"raw_findings": raw_findings, "queries_run": queries_run}
+
+
 def _infer_event_type(description: str, row: Dict[str, Any]) -> str:
     text = f"{description} {json.dumps(row, default=str)}".lower()
     if "eventcode" in text or "logon" in text or "auth" in text:
@@ -479,110 +588,89 @@ def _mock_synthesize_report(
     }
 
 
+def _normalize_report_json(report_json: Dict[str, Any]) -> Dict[str, Any]:
+    """Coerce model output into schema-safe report payload."""
+    normalized: Dict[str, Any] = dict(report_json or {})
+
+    def _safe_str(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        return json.dumps(value, default=str)
+
+    timeline = normalized.get("timeline")
+    if not isinstance(timeline, list):
+        timeline = []
+    clean_timeline: List[Dict[str, Any]] = []
+    for item in timeline:
+        if not isinstance(item, dict):
+            continue
+        clean_timeline.append(
+            {
+                "timestamp": _safe_str(
+                    item.get("timestamp", datetime.now(timezone.utc).isoformat())
+                ),
+                "event_type": _safe_str(item.get("event_type", "network")),
+                "description": _safe_str(item.get("description", "Investigation event")),
+                "raw_log": _safe_str(item.get("raw_log", "")),
+                "severity": _safe_str(item.get("severity", "medium")),
+            }
+        )
+    normalized["timeline"] = clean_timeline
+
+    mitre = normalized.get("mitre_techniques")
+    if not isinstance(mitre, list):
+        mitre = []
+    clean_mitre: List[Dict[str, Any]] = []
+    for item in mitre:
+        if not isinstance(item, dict):
+            continue
+        clean_mitre.append(
+            {
+                "technique_id": _safe_str(item.get("technique_id", "T0000")),
+                "name": _safe_str(item.get("name", "Unknown")),
+                "tactic": _safe_str(item.get("tactic", "Unknown")),
+                "description": _safe_str(item.get("description", "")),
+            }
+        )
+    normalized["mitre_techniques"] = clean_mitre
+
+    remediation = normalized.get("remediation_steps")
+    if not isinstance(remediation, list):
+        remediation = []
+    clean_remediation: List[Dict[str, Any]] = []
+    for item in remediation:
+        if not isinstance(item, dict):
+            continue
+        clean_remediation.append(
+            {
+                "priority": _safe_str(item.get("priority", "Medium")),
+                "action": _safe_str(item.get("action", "Review related alerts.")),
+                "rationale": _safe_str(item.get("rationale", "")),
+            }
+        )
+    normalized["remediation_steps"] = clean_remediation
+
+    normalized["severity"] = _safe_str(normalized.get("severity", "Medium"))
+    normalized["severity_rationale"] = _safe_str(
+        normalized.get("severity_rationale", "Severity inferred from available findings.")
+    )
+    normalized["summary"] = _safe_str(
+        normalized.get("summary", "Investigation completed using available evidence.")
+    )
+
+    return normalized
+
+
 def run_investigation_agent(
     entity: str, entity_type: str, time_range: str, index: str
 ) -> Dict[str, Any]:
     """
-    Autonomous investigation loop using HF model or mock fallback.
+    Deterministic investigation plan with provider-specific synthesis.
     """
     provider = _provider()
-    if provider == "mock":
-        return _run_mock_investigation_agent(entity, entity_type, time_range, index)
-    if provider != "hf":
+    if provider not in {"hf", "mock"}:
         raise RuntimeError(f"Unsupported AI_PROVIDER '{provider}'. Use hf or mock.")
-
-    raw_findings: Dict[str, Any] = {}
-    queries_run = []
-    tool_call_count = 0
-
-    while tool_call_count < MAX_TOOL_CALLS:
-        findings_snapshot = json.dumps(raw_findings, default=str)[-25000:]
-        decision_prompt = f"""
-Entity: {entity}
-Entity type: {entity_type}
-Time range: {time_range}
-Index: {index}
-Tool calls used: {tool_call_count}/{MAX_TOOL_CALLS}
-
-Current findings JSON:
-{findings_snapshot}
-
-Choose exactly one next action and return ONLY valid JSON in one of these formats:
-1) {{
-  "action": "run_splunk_query",
-  "description": "what this query checks",
-  "spl": "search index={index} earliest={time_range} ..."
-}}
-2) {{
-  "action": "get_field_values",
-  "field": "field_name",
-  "index": "{index}"
-}}
-3) {{
-  "action": "finish",
-  "reason": "why investigation is complete"
-}}
-
-Rules:
-- Run at least 4 query actions before finish unless data is unavailable.
-- Use concrete SPL, not placeholders.
-- Keep responses JSON only.
-""".strip()
-
-        decision_raw = _hf_generate(
-            user_prompt=decision_prompt,
-            system_prompt=INVESTIGATION_SYSTEM,
-            max_tokens=1024,
-            temperature=0.1,
-        )
-        decision = _extract_json_object(decision_raw)
-        action = decision.get("action")
-
-        if action == "finish":
-            break
-
-        if action == "run_splunk_query":
-            spl = decision.get("spl", "").strip()
-            description = decision.get("description", "Investigation query")
-            if not spl:
-                break
-            tool_call_count += 1
-            result = execute_tool(
-                "run_splunk_query",
-                {"spl": spl, "description": description},
-                time_range=time_range,
-            )
-            query_key = f"query_{tool_call_count}"
-            raw_findings[query_key] = {
-                "description": description,
-                "spl": spl,
-                "results": result,
-            }
-            queries_run.append(spl)
-            continue
-
-        if action == "get_field_values":
-            field = decision.get("field", "").strip()
-            tool_index = decision.get("index", index)
-            if not field:
-                break
-            tool_call_count += 1
-            result = execute_tool(
-                "get_field_values",
-                {"field": field, "index": tool_index},
-                time_range=time_range,
-            )
-            query_key = f"query_{tool_call_count}"
-            raw_findings[query_key] = {
-                "description": f"Top values for field: {field}",
-                "spl": "",
-                "results": result,
-            }
-            continue
-
-        break
-
-    return {"raw_findings": raw_findings, "queries_run": queries_run}
+    return _run_deterministic_investigation_agent(entity, entity_type, time_range, index)
 
 
 def synthesize_report(
@@ -593,7 +681,9 @@ def synthesize_report(
     """
     provider = _provider()
     if provider == "mock":
-        return _mock_synthesize_report(entity, entity_type, agent_output)
+        return _normalize_report_json(
+            _mock_synthesize_report(entity, entity_type, agent_output)
+        )
     if provider != "hf":
         raise RuntimeError(f"Unsupported AI_PROVIDER '{provider}'. Use hf or mock.")
 
@@ -604,13 +694,19 @@ def synthesize_report(
         queries_run=json.dumps(agent_output["queries_run"], indent=2),
         raw_findings=json.dumps(agent_output["raw_findings"], indent=2),
     )
-    response_text = _hf_generate(
-        user_prompt=prompt,
-        system_prompt="Return only valid JSON. No markdown.",
-        max_tokens=4096,
-        temperature=0.1,
-    )
-    return _extract_json_object(response_text)
+    try:
+        response_text = _hf_generate(
+            user_prompt=prompt,
+            system_prompt="Return only valid JSON. No markdown.",
+            max_tokens=4096,
+            temperature=0.1,
+        )
+        return _normalize_report_json(_extract_json_object(response_text))
+    except Exception:
+        # Keep investigations functional when HF synthesis is unavailable.
+        return _normalize_report_json(
+            _mock_synthesize_report(entity, entity_type, agent_output)
+        )
 
 
 def _mock_generate_spl(natural_language: str, time_range: str, index: str) -> str:

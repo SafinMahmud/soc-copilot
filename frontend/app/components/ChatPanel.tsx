@@ -6,10 +6,10 @@ import type { InputMode } from "@/lib/detect-mode";
 import type { ChatMessage } from "@/lib/types";
 
 const STARTER_PROMPTS = [
-  "Show top sourcetypes from _internal and _audit in the last 24 hours",
-  "Show recent search activity from audit logs in the last 24 hours",
   "Investigate IP 23.20.239.12",
-  "Show failed login events from audit logs in the last 24 hours",
+  "Investigate IP 10.0.1.25",
+  "Investigate user safin",
+  "Investigate host Safins-MacBook-Air.local",
 ];
 
 export function ChatPanel({
@@ -87,7 +87,7 @@ export function ChatPanel({
         <div className="space-y-3">
           {messages.length === 0 && (
             <p className="text-sm text-gray-500">
-              Ask in plain English — SPL generation or autonomous investigation.
+              Investigation-first copilot: submit an IP, user, or host for autonomous case investigation.
             </p>
           )}
           <div className="grid gap-2">
@@ -122,7 +122,7 @@ export function ChatPanel({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder='Try: "Show top sourcetypes in the last 24 hours" or "Investigate IP 23.20.239.12"'
+          placeholder='Try: "Investigate IP 23.20.239.12", "Investigate user safin", or "Investigate host Safins-MacBook-Air.local"'
           rows={3}
           disabled={isLoading}
           className="w-full resize-none rounded-lg border border-soc-border bg-soc-bg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
