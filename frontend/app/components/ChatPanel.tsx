@@ -6,10 +6,10 @@ import type { InputMode } from "@/lib/detect-mode";
 import type { ChatMessage } from "@/lib/types";
 
 const STARTER_PROMPTS = [
-  "Show recent events from Splunk internal logs",
-  "Show top sourcetypes in the last 24 hours",
+  "Show top sourcetypes from _internal and _audit in the last 24 hours",
+  "Show recent search activity from audit logs in the last 24 hours",
   "Investigate IP 23.20.239.12",
-  "Show me failed logins in the last 24 hours",
+  "Show failed login events from audit logs in the last 24 hours",
 ];
 
 export function ChatPanel({
@@ -20,6 +20,7 @@ export function ChatPanel({
   aiProvider,
   aiModel,
   onStarterClick,
+  onOpenReport,
 }: {
   messages: ChatMessage[];
   onSend: (text: string) => void;
@@ -28,6 +29,7 @@ export function ChatPanel({
   aiProvider: string;
   aiModel: string;
   onStarterClick: (text: string) => void;
+  onOpenReport: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
@@ -66,7 +68,7 @@ export function ChatPanel({
             )}
             title={aiModel}
           >
-            AI: {aiProvider === "mock" ? "Mock" : "Gemini"}
+            AI: {aiProvider === "mock" ? "Mock" : "HF Model"}
           </span>
           <span
             className={clsx(
@@ -103,7 +105,7 @@ export function ChatPanel({
         </div>
 
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <MessageBubble key={msg.id} message={msg} onOpenReport={onOpenReport} />
         ))}
 
         {isLoading && (
@@ -138,7 +140,13 @@ export function ChatPanel({
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({
+  message,
+  onOpenReport,
+}: {
+  message: ChatMessage;
+  onOpenReport: () => void;
+}) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -156,7 +164,16 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       <div className="max-w-[90%] rounded-lg bg-soc-panel px-3 py-2 text-sm text-gray-300">
         Found {message.resultCount} results for:{" "}
         <code className="text-xs text-emerald-400/90">{truncated}</code>
-        <p className="mt-1 text-xs text-gray-500">See full results in the report panel →</p>
+        <p className="mt-1 text-xs text-gray-500">
+          Full rows are shown in the Results panel on the right.
+        </p>
+        <button
+          type="button"
+          onClick={onOpenReport}
+          className="mt-2 rounded-md border border-blue-500/40 bg-blue-600/20 px-2.5 py-1 text-xs font-medium text-blue-300 hover:bg-blue-600/30"
+        >
+          View Report
+        </button>
       </div>
     );
   }
@@ -176,6 +193,13 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           Investigation complete. Severity: {message.severity.toUpperCase()}
         </p>
         <p className="mt-1 text-gray-400">{message.summary}</p>
+        <button
+          type="button"
+          onClick={onOpenReport}
+          className="mt-2 rounded-md border border-red-500/40 bg-red-600/20 px-2.5 py-1 text-xs font-medium text-red-200 hover:bg-red-600/30"
+        >
+          Open Investigation Report
+        </button>
       </div>
     );
   }

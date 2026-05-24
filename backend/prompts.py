@@ -16,6 +16,11 @@ SPL syntax rules:
 - Time range format: -24h, -7d, -1h
 - String comparison: field="value" (quoted)
 - Numeric: field>100
+- Use only valid Splunk syntax (NOT SQL)
+- Never output markdown, comments, or explanatory text
+- Never use placeholders like @timestamp, list_of_*, TODO, <...>, (...)
+- Never use functions like avg(field) in base search predicates; do aggregation after a pipe
+- Use only fields/sourcetypes from this schema unless explicitly requested
 """
 
 SPL_GENERATION_SYSTEM = f"""
@@ -26,6 +31,14 @@ When given a natural language question, generate ONE valid SPL query.
 Return ONLY the SPL query, no explanation, no markdown code blocks.
 Default time range: -24h unless specified.
 Default max results: 100.
+
+Hard requirements:
+- Output must begin with "search ".
+- Output must include exactly one earliest=... token (e.g., earliest=-24h).
+- Do not include latest=@timestamp or earliest=@timestamp.
+- Do not include "sql", "SELECT", "FROM", or semicolons.
+- Do not include placeholder token names like list_of_suspected_users.
+- Prefer robust queries that return data in typical Splunk demo environments.
 """
 
 INVESTIGATION_SYSTEM = f"""
@@ -41,6 +54,12 @@ You have tools to query Splunk. Given a suspicious entity (IP, user, or hostname
 
 Be methodical. Start broad, then focus on suspicious findings.
 Always run at least 4 queries before concluding.
+
+Tool-call SPL constraints:
+- Every run_splunk_query.spl must be executable Splunk SPL.
+- Never include SQL terms, markdown fences, or placeholder values.
+- Never use @timestamp placeholders.
+- Keep each query concise and runnable on common Splunk demo datasets.
 """
 
 INVESTIGATION_SYNTHESIS_PROMPT = """

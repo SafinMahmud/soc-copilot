@@ -14,6 +14,19 @@ import type {
 } from "@/lib/types";
 
 type ResultView = "query" | "investigation" | null;
+type ReportHistoryItem =
+  | {
+      id: string;
+      kind: "query";
+      label: string;
+      result: SPLResult;
+    }
+  | {
+      id: string;
+      kind: "investigation";
+      label: string;
+      result: InvestigationReport;
+    };
 
 export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -25,11 +38,31 @@ export default function Home() {
   const [inputMode, setInputMode] = useState<InputMode>("query");
   const [error, setError] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<"chat" | "report">("chat");
-  const [aiProvider, setAiProvider] = useState("gemini");
-  const [aiModel, setAiModel] = useState("gemini-2.0-flash");
+  const [aiProvider, setAiProvider] = useState("hf");
+  const [aiModel, setAiModel] = useState("fdtn-ai/Foundation-Sec-1.1-8B-Instruct:featherless-ai");
+  const [reportHistory, setReportHistory] = useState<ReportHistoryItem[]>([]);
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
 
   const addMessage = useCallback((msg: ChatMessage) => {
     setMessages((prev) => [...prev, msg]);
+  }, []);
+
+  const openReportPanel = useCallback(() => {
+    setMobileTab("report");
+  }, []);
+
+  const selectHistoryItem = useCallback((item: ReportHistoryItem) => {
+    setSelectedReportId(item.id);
+    setMobileTab("report");
+    if (item.kind === "query") {
+      setCurrentResult("query");
+      setQueryResult(item.result);
+      setInvestigationReport(null);
+      return;
+    }
+    setCurrentResult("investigation");
+    setInvestigationReport(item.result);
+    setQueryResult(null);
   }, []);
 
   const handleSend = async (text: string) => {
@@ -38,10 +71,10 @@ export default function Home() {
     setError(null);
     addMessage({ id: crypto.randomUUID(), role: "user", content: text });
     setIsLoading(true);
-    setMobileTab("report");
 
     try {
       if (intent.mode === "investigate" && intent.entity && intent.entityType) {
+        setMobileTab("report");
         addMessage({
           id: crypto.randomUUID(),
           role: "assistant",
@@ -56,6 +89,14 @@ export default function Home() {
         setInvestigationReport(report);
         setCurrentResult("investigation");
         setQueryResult(null);
+        const historyItem: ReportHistoryItem = {
+          id: crypto.randomUUID(),
+          kind: "investigation",
+          label: `Investigation: ${intent.entity}`,
+          result: report,
+        };
+        setReportHistory((prev) => [historyItem, ...prev]);
+        setSelectedReportId(historyItem.id);
 
         addMessage({
           id: crypto.randomUUID(),
@@ -65,10 +106,19 @@ export default function Home() {
           summary: report.summary,
         });
       } else {
+        setMobileTab("chat");
         const result = await queryNaturalLanguage(text);
         setQueryResult(result);
         setCurrentResult("query");
         setInvestigationReport(null);
+        const historyItem: ReportHistoryItem = {
+          id: crypto.randomUUID(),
+          kind: "query",
+          label: `Query: ${text.slice(0, 48)}${text.length > 48 ? "..." : ""}`,
+          result,
+        };
+        setReportHistory((prev) => [historyItem, ...prev]);
+        setSelectedReportId(historyItem.id);
 
         addMessage({
           id: crypto.randomUUID(),
@@ -148,6 +198,7 @@ export default function Home() {
             aiProvider={aiProvider}
             aiModel={aiModel}
             onStarterClick={handleStarter}
+            onOpenReport={openReportPanel}
           />
         </div>
 
@@ -159,6 +210,32 @@ export default function Home() {
           <h2 className="mb-4 text-sm font-medium uppercase tracking-wide text-gray-500">
             Results
           </h2>
+
+          {reportHistory.length > 0 && (
+            <div className="mb-4 rounded-lg border border-soc-border bg-soc-panel/40 p-3">
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">
+                Report History
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {reportHistory.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => selectHistoryItem(item)}
+                    className={`rounded-md border px-2.5 py-1 text-xs ${
+                      selectedReportId === item.id
+                        ? "border-blue-500/60 bg-blue-600/20 text-blue-200"
+                        : "border-soc-border bg-soc-bg text-gray-300 hover:border-blue-500/40"
+                    }`}
+                    title={item.label}
+                  >
+                    {item.kind === "query" ? "Query" : "Investigation"}:{" "}
+                    {item.label.replace(/^Query: |^Investigation: /, "")}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="mb-4 rounded-lg border border-red-500/50 bg-red-950/40 px-4 py-3 text-sm text-red-300">

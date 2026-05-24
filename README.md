@@ -18,7 +18,7 @@ See `architecture.md` for full data flow diagram.
 - Python 3.11+
 - Node.js 18+
 - Splunk Enterprise (free developer license)
-- Google Gemini API key (Google AI Studio free tier)
+- Hugging Face token for serverless inference (Foundation-Sec-1.1-8B-Instruct)
 
 ## Setup
 
@@ -35,7 +35,7 @@ See `architecture.md` for full data flow diagram.
 ```bash
 cd backend
 cp .env.example .env
-# Fill in AI_PROVIDER, GEMINI_API_KEY, and Splunk credentials
+# Fill in AI_PROVIDER, HF_TOKEN, and Splunk credentials
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8001
 ```
@@ -44,8 +44,8 @@ For local key setup instructions, create and read `backend/README_GEMINI_KEY.md`
 (this file is intentionally gitignored and local-only).
 
 Backend AI provider options:
-- `AI_PROVIDER=gemini` (default, best quality for final demo)
-- `AI_PROVIDER=mock` (fallback mode when Gemini quota is exhausted)
+- `AI_PROVIDER=hf` (default, uses Hugging Face serverless inference)
+- `AI_PROVIDER=mock` (fallback mode when Hugging Face endpoint is unavailable)
 
 ### 3. Frontend Setup
 

@@ -30,14 +30,49 @@ app.add_middleware(
 )
 
 
+def _fallback_query_for_message(message: str, time_range: str) -> str:
+    lower = message.lower()
+    tr = time_range or "-24h"
+
+    if "sourcetype" in lower:
+        return (
+            f"search (index=_internal OR index=_audit) earliest={tr} "
+            "| stats count by sourcetype source | sort - count | head 50"
+        )
+    if "failed login" in lower or "login failure" in lower:
+        return (
+            f"search (index=_audit OR index=_internal) earliest={tr} "
+            '(EventCode=4625 OR action="failure" OR "failed login") '
+            "| stats count by user src c_ip host | sort - count | head 50"
+        )
+    if "audit" in lower or "search activity" in lower:
+        return (
+            f"search index=_audit earliest={tr} action=search "
+            "| stats count by user app info | sort - count | head 50"
+        )
+    if "internal" in lower or "recent events" in lower:
+        return (
+            f"search (index=_internal OR index=_audit) earliest={tr} "
+            "| table _time host source sourcetype action user info "
+            "| sort - _time | head 100"
+        )
+    return (
+        f"search (index=_internal OR index=_audit OR index={INDEX}) earliest={tr} "
+        "| table _time host source sourcetype action user info "
+        "| sort - _time | head 100"
+    )
+
+
 @app.get("/api/health")
 def health():
-    provider = os.getenv("AI_PROVIDER", "gemini").strip().lower()
-    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    provider = os.getenv("AI_PROVIDER", "hf").strip().lower()
+    model = os.getenv(
+        "HF_MODEL", "fdtn-ai/Foundation-Sec-1.1-8B-Instruct:featherless-ai"
+    )
     return {
         "status": "ok",
         "ai_provider": provider,
-        "model": model if provider == "gemini" else "mock",
+        "model": model if provider == "hf" else "mock",
     }
 
 
@@ -47,23 +82,22 @@ def natural_language_query(req: QueryRequest):
     try:
         spl = generate_spl(req.message, req.time_range, INDEX)
         results = splunk.run_query(spl)
-        provider = os.getenv("AI_PROVIDER", "gemini").strip().lower()
-        if (
-            provider == "mock"
-            and (not results or (isinstance(results[0], dict) and "error" not in results[0]))
-            and len(results) == 0
-        ):
-            fallback_spl = (
-                f"search (index={INDEX} OR index=main OR index=botsv3 OR index=_internal OR index=_audit) "
-                "earliest=-90d | head 100"
-            )
+        has_error = bool(results and isinstance(results[0], dict) and "error" in results[0])
+        no_rows = bool(results is not None and len(results) == 0)
+
+        if has_error or no_rows:
+            fallback_spl = _fallback_query_for_message(req.message, req.time_range)
             fallback_results = splunk.run_query(fallback_spl)
-            if fallback_results and not (
-                isinstance(fallback_results[0], dict)
-                and "error" in fallback_results[0]
-            ):
+            fallback_ok = bool(
+                fallback_results
+                and not (
+                    isinstance(fallback_results[0], dict) and "error" in fallback_results[0]
+                )
+            )
+            if fallback_ok:
                 spl = fallback_spl
                 results = fallback_results
+
         if results and len(results) > 0 and "error" in results[0]:
             return SPLResult(
                 spl=spl,

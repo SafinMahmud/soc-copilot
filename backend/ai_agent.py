@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -24,7 +25,7 @@ def _get_splunk() -> SplunkClient:
 
 
 def _provider() -> str:
-    return os.getenv("AI_PROVIDER", "gemini").strip().lower()
+    return os.getenv("AI_PROVIDER", "hf").strip().lower()
 
 
 def _strip_markdown_fences(text: str) -> str:
@@ -35,6 +36,55 @@ def _strip_markdown_fences(text: str) -> str:
             text = text[4:]
         text = text.strip()
     return text
+
+
+def _sanitize_spl(spl: str) -> str:
+    """Normalize model output into executable SPL."""
+    cleaned = _strip_markdown_fences(spl).strip()
+    if not cleaned:
+        return cleaned
+
+    lines = [ln for ln in cleaned.splitlines() if ln.strip()]
+    while lines and lines[0].strip().lower() in {"sql", "spl"}:
+        lines.pop(0)
+    cleaned = "\n".join(lines).strip()
+
+    # Remove common invalid placeholders that models sometimes invent.
+    cleaned = cleaned.replace("latest=@timestamp", "").replace("earliest=@timestamp", "")
+    cleaned = cleaned.replace("@timestamp NOT NULL", "")
+    cleaned = re.sub(r"\blatest=@[A-Za-z0-9_]+\b", "", cleaned)
+    cleaned = re.sub(r"\bearliest=@[A-Za-z0-9_]+\b", "", cleaned)
+
+    # Drop leading SQL markers and SQL-style punctuation.
+    cleaned = re.sub(r"^\s*(sql|spl)\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.replace(";", " ")
+
+    # Remove placeholder-based predicates that make SPL invalid.
+    cleaned = re.sub(r"\b\w+\s+IN\s+\(list_of_[^)]+\)", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(list_of_[A-Za-z0-9_]+)\b", "", cleaned)
+
+    # Remove impossible aggregate predicates from base search terms.
+    cleaned = re.sub(
+        r"\b(avg|min|max|sum|count)\s*\([^)]*\)\s*[<>=!]+\s*[^\s|]+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+
+    # In post-stats where clauses, rewrite aggregate expressions to plain fields
+    # to avoid malformed expressions like where sum(bytes_in) > 1000.
+    cleaned = re.sub(r"\bsum\(([^)]+)\)", r"\1", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bavg\(([^)]+)\)", r"\1", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bmin\(([^)]+)\)", r"\1", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bmax\(([^)]+)\)", r"\1", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bcount\(([^)]*)\)", "count", cleaned, flags=re.IGNORECASE)
+
+    # Collapse redundant whitespace after removals.
+    cleaned = " ".join(cleaned.split())
+
+    if cleaned and not cleaned.lower().startswith(("search ", "|", "index=")):
+        cleaned = f"search {cleaned}"
+    return cleaned.strip()
 
 
 def _extract_json_object(text: str) -> Dict[str, Any]:
@@ -49,79 +99,114 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
         raise
 
 
-def _extract_gemini_text(payload: Dict[str, Any]) -> str:
-    candidates = payload.get("candidates", [])
-    if not candidates:
-        raise RuntimeError(f"Gemini response missing candidates: {payload}")
-    content = candidates[0].get("content", {})
-    parts = content.get("parts", [])
-    text = "".join(part.get("text", "") for part in parts if "text" in part)
-    if not text:
-        raise RuntimeError(f"Gemini response missing text content: {payload}")
-    return text
+def _extract_hf_text(payload: Any) -> str:
+    if isinstance(payload, dict):
+        choices = payload.get("choices")
+        if isinstance(choices, list) and choices:
+            msg = choices[0].get("message", {})
+            if isinstance(msg, dict) and msg.get("content"):
+                return str(msg["content"]).strip()
+            if choices[0].get("text"):
+                return str(choices[0]["text"]).strip()
+
+        for key in ("generated_text", "response", "text", "output"):
+            if payload.get(key):
+                return str(payload[key]).strip()
+
+        outputs = payload.get("outputs")
+        if isinstance(outputs, list) and outputs and isinstance(outputs[0], dict):
+            if outputs[0].get("text"):
+                return str(outputs[0]["text"]).strip()
+
+    if isinstance(payload, list) and payload:
+        first = payload[0]
+        if isinstance(first, dict):
+            if first.get("generated_text"):
+                return str(first["generated_text"]).strip()
+            if first.get("text"):
+                return str(first["text"]).strip()
+
+    raise RuntimeError("Hugging Face response did not contain readable text output.")
 
 
-def _gemini_generate(
+def _hf_generate(
     user_prompt: str,
     system_prompt: str = "",
     max_tokens: int = 2048,
     temperature: float = 0.2,
 ) -> str:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is not set. Add it to backend/.env.")
+    model_url = os.getenv(
+        "HF_API_URL", "https://router.huggingface.co/v1/chat/completions"
+    ).strip()
+    hf_token = os.getenv("HF_TOKEN", "").strip()
+    model_name = os.getenv(
+        "HF_MODEL", "fdtn-ai/Foundation-Sec-1.1-8B-Instruct:featherless-ai"
+    ).strip()
+    if not hf_token:
+        raise RuntimeError("HF_TOKEN is not set in backend/.env.")
 
-    requested_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-    model_candidates = [
-        requested_model,
-        "gemini-2.0-flash",
-        "gemini-flash-latest",
-        "gemini-2.5-flash",
-        "gemini-2.0-flash-lite",
-    ]
-
-    body: Dict[str, Any] = {
-        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-        "generationConfig": {
-            "temperature": temperature,
-            "maxOutputTokens": max_tokens,
-        },
+    headers = {
+        "Authorization": f"Bearer {hf_token}",
+        "Content-Type": "application/json",
     }
+    messages = []
     if system_prompt:
-        body["system_instruction"] = {"parts": [{"text": system_prompt}]}
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": user_prompt})
+    prompt = (
+        f"{system_prompt}\n\nUser request:\n{user_prompt}"
+        if system_prompt
+        else user_prompt
+    )
+
+    chat_payload: Dict[str, Any] = {
+        "model": model_name,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
 
     with httpx.Client(timeout=90.0) as client:
-        last_error: Optional[str] = None
-        for model in model_candidates:
-            url = (
-                "https://generativelanguage.googleapis.com/v1beta/models/"
-                f"{model}:generateContent"
+        chat_resp = client.post(model_url, headers=headers, json=chat_payload)
+        if chat_resp.status_code == 429:
+            raise RuntimeError(
+                "Hugging Face quota/rate limit reached. Retry later or use AI_PROVIDER=mock."
             )
-            response = client.post(url, params={"key": api_key}, json=body)
-            if response.status_code == 404:
-                last_error = f"Model '{model}' not found on this API key/project."
-                continue
-            if response.status_code == 429:
-                raise RuntimeError(
-                    "Gemini quota exceeded for this API key/project. "
-                    "Create a new Google AI Studio key with available quota, "
-                    "or switch AI_PROVIDER=mock for offline demo mode."
-                )
-            if response.is_error:
-                raise RuntimeError(
-                    f"Gemini API error {response.status_code}: {response.text[:400]}"
-                )
-            return _extract_gemini_text(response.json()).strip()
+        if not chat_resp.is_error:
+            return _extract_hf_text(chat_resp.json())
+        # Router may reject model/provider combos for chat completions. Fallback to
+        # the standard serverless inference API for the same model.
+        base_model = model_name.split(":")[0]
+        fallback_url = os.getenv(
+            "HF_FALLBACK_API_URL",
+            f"https://api-inference.huggingface.co/models/{base_model}",
+        ).strip()
+        fallback_payload: Dict[str, Any] = {
+            "inputs": prompt,
+            "parameters": {
+                "temperature": temperature,
+                "max_new_tokens": max_tokens,
+                "return_full_text": False,
+            },
+        }
+        fallback_resp = client.post(fallback_url, headers=headers, json=fallback_payload)
+        if fallback_resp.status_code == 429:
+            raise RuntimeError(
+                "Hugging Face quota/rate limit reached. Retry later or use AI_PROVIDER=mock."
+            )
+        if not fallback_resp.is_error:
+            return _extract_hf_text(fallback_resp.json())
         raise RuntimeError(
-            last_error
-            or "Unable to find an available Gemini model for this API key."
+            "Hugging Face model request failed "
+            f"(router status {chat_resp.status_code}, fallback status {fallback_resp.status_code}). "
+            "Check HF_MODEL/HF_TOKEN and model access in your Hugging Face account."
         )
 
 
 def execute_tool(tool_name: str, tool_input: Dict[str, Any], time_range: str = "-24h"):
     """Route tool calls to Splunk client."""
     if tool_name == "run_splunk_query":
-        return _get_splunk().run_query(tool_input["spl"])
+        return _get_splunk().run_query(_sanitize_spl(tool_input["spl"]))
     if tool_name == "get_field_values":
         return _get_splunk().get_field_values(
             tool_input["field"],
@@ -398,13 +483,13 @@ def run_investigation_agent(
     entity: str, entity_type: str, time_range: str, index: str
 ) -> Dict[str, Any]:
     """
-    Autonomous investigation loop using Gemini planning or mock fallback.
+    Autonomous investigation loop using HF model or mock fallback.
     """
     provider = _provider()
     if provider == "mock":
         return _run_mock_investigation_agent(entity, entity_type, time_range, index)
-    if provider != "gemini":
-        raise RuntimeError(f"Unsupported AI_PROVIDER '{provider}'. Use gemini or mock.")
+    if provider != "hf":
+        raise RuntimeError(f"Unsupported AI_PROVIDER '{provider}'. Use hf or mock.")
 
     raw_findings: Dict[str, Any] = {}
     queries_run = []
@@ -444,7 +529,7 @@ Rules:
 - Keep responses JSON only.
 """.strip()
 
-        decision_raw = _gemini_generate(
+        decision_raw = _hf_generate(
             user_prompt=decision_prompt,
             system_prompt=INVESTIGATION_SYSTEM,
             max_tokens=1024,
@@ -509,8 +594,8 @@ def synthesize_report(
     provider = _provider()
     if provider == "mock":
         return _mock_synthesize_report(entity, entity_type, agent_output)
-    if provider != "gemini":
-        raise RuntimeError(f"Unsupported AI_PROVIDER '{provider}'. Use gemini or mock.")
+    if provider != "hf":
+        raise RuntimeError(f"Unsupported AI_PROVIDER '{provider}'. Use hf or mock.")
 
     prompt = INVESTIGATION_SYNTHESIS_PROMPT.format(
         entity=entity,
@@ -519,7 +604,7 @@ def synthesize_report(
         queries_run=json.dumps(agent_output["queries_run"], indent=2),
         raw_findings=json.dumps(agent_output["raw_findings"], indent=2),
     )
-    response_text = _gemini_generate(
+    response_text = _hf_generate(
         user_prompt=prompt,
         system_prompt="Return only valid JSON. No markdown.",
         max_tokens=4096,
@@ -575,22 +660,22 @@ def _mock_generate_spl(natural_language: str, time_range: str, index: str) -> st
 
 def generate_spl(natural_language: str, time_range: str, index: str) -> str:
     """
-    Convert natural language to SPL using Gemini or mock fallback.
+    Convert natural language to SPL using HF model or mock fallback.
     """
     provider = _provider()
     if provider == "mock":
         return _mock_generate_spl(natural_language, time_range, index)
-    if provider != "gemini":
-        raise RuntimeError(f"Unsupported AI_PROVIDER '{provider}'. Use gemini or mock.")
+    if provider != "hf":
+        raise RuntimeError(f"Unsupported AI_PROVIDER '{provider}'. Use hf or mock.")
 
     prompt = (
         f"Convert to SPL. Index: {index}. Time range: {time_range}.\n"
         f"Question: {natural_language}"
     )
-    spl = _gemini_generate(
+    spl = _hf_generate(
         user_prompt=prompt,
         system_prompt=SPL_GENERATION_SYSTEM,
         max_tokens=512,
         temperature=0.1,
     )
-    return _strip_markdown_fences(spl)
+    return _sanitize_spl(spl)

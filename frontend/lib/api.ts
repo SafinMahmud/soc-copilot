@@ -35,7 +35,7 @@ export async function investigateEntity(
 
 export interface HealthResponse {
   status: "ok";
-  ai_provider?: "gemini" | "mock" | string;
+  ai_provider?: "hf" | "mock" | string;
   model?: string;
 }
 
