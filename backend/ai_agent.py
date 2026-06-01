@@ -129,6 +129,85 @@ def _extract_hf_text(payload: Any) -> str:
     raise RuntimeError("Hugging Face response did not contain readable text output.")
 
 
+def _ollama_base_url() -> str:
+    """Build Ollama base URL from OLLAMA_HOST or fall back to OLLAMA_BASE_URL."""
+    host = os.getenv("OLLAMA_HOST", "").strip()
+    if host:
+        if host.startswith(("http://", "https://")):
+            return host.rstrip("/")
+        scheme = os.getenv("OLLAMA_SCHEME", "http").strip() or "http"
+        port = os.getenv("OLLAMA_PORT", "11434").strip() or "11434"
+        return f"{scheme}://{host}:{port}".rstrip("/")
+    return os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+
+
+def _ollama_generate(
+    user_prompt: str,
+    system_prompt: str = "",
+    max_tokens: int = 2048,
+    temperature: float = 0.2,
+) -> str:
+    from llm_vm import ensure_llm_ready, get_instance_status, touch_llm_activity
+
+    # Investigation may already be warming the VM in a background thread.
+    if get_instance_status() == "RUNNING":
+        ensure_llm_ready(timeout_seconds=60)
+    else:
+        synthesis_wait = int(os.getenv("OLLAMA_SYNTHESIS_WAIT_SECONDS", "180"))
+        ensure_llm_ready(timeout_seconds=synthesis_wait)
+    touch_llm_activity()
+
+    base = _ollama_base_url()
+    model = os.getenv(
+        "OLLAMA_MODEL",
+        "hf.co/mradermacher/Foundation-Sec-8B-Instruct-GGUF:Q4_K_M",
+    ).strip()
+    url = f"{base}/v1/chat/completions"
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": user_prompt})
+
+    payload: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+
+    with httpx.Client(timeout=180.0) as client:
+        resp = client.post(url, json=payload)
+        if resp.is_error:
+            raise RuntimeError(
+                f"Ollama request failed ({resp.status_code}): {resp.text[:400]}"
+            )
+        return _extract_hf_text(resp.json())
+
+
+def _llm_generate(
+    user_prompt: str,
+    system_prompt: str = "",
+    max_tokens: int = 2048,
+    temperature: float = 0.2,
+) -> str:
+    provider = _provider()
+    if provider == "ollama":
+        return _ollama_generate(
+            user_prompt=user_prompt,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+    return _hf_generate(
+        user_prompt=user_prompt,
+        system_prompt=system_prompt,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+
+
 def _hf_generate(
     user_prompt: str,
     system_prompt: str = "",
@@ -668,8 +747,10 @@ def run_investigation_agent(
     Deterministic investigation plan with provider-specific synthesis.
     """
     provider = _provider()
-    if provider not in {"hf", "mock"}:
-        raise RuntimeError(f"Unsupported AI_PROVIDER '{provider}'. Use hf or mock.")
+    if provider not in {"hf", "mock", "ollama"}:
+        raise RuntimeError(
+            f"Unsupported AI_PROVIDER '{provider}'. Use hf, ollama, or mock."
+        )
     return _run_deterministic_investigation_agent(entity, entity_type, time_range, index)
 
 
@@ -684,8 +765,10 @@ def synthesize_report(
         return _normalize_report_json(
             _mock_synthesize_report(entity, entity_type, agent_output)
         )
-    if provider != "hf":
-        raise RuntimeError(f"Unsupported AI_PROVIDER '{provider}'. Use hf or mock.")
+    if provider not in {"hf", "ollama"}:
+        raise RuntimeError(
+            f"Unsupported AI_PROVIDER '{provider}'. Use hf, ollama, or mock."
+        )
 
     prompt = INVESTIGATION_SYNTHESIS_PROMPT.format(
         entity=entity,
@@ -695,7 +778,7 @@ def synthesize_report(
         raw_findings=json.dumps(agent_output["raw_findings"], indent=2),
     )
     try:
-        response_text = _hf_generate(
+        response_text = _llm_generate(
             user_prompt=prompt,
             system_prompt="Return only valid JSON. No markdown.",
             max_tokens=4096,
@@ -761,14 +844,16 @@ def generate_spl(natural_language: str, time_range: str, index: str) -> str:
     provider = _provider()
     if provider == "mock":
         return _mock_generate_spl(natural_language, time_range, index)
-    if provider != "hf":
-        raise RuntimeError(f"Unsupported AI_PROVIDER '{provider}'. Use hf or mock.")
+    if provider not in {"hf", "ollama"}:
+        raise RuntimeError(
+            f"Unsupported AI_PROVIDER '{provider}'. Use hf, ollama, or mock."
+        )
 
     prompt = (
         f"Convert to SPL. Index: {index}. Time range: {time_range}.\n"
         f"Question: {natural_language}"
     )
-    spl = _hf_generate(
+    spl = _llm_generate(
         user_prompt=prompt,
         system_prompt=SPL_GENERATION_SYSTEM,
         max_tokens=512,

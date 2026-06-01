@@ -14,7 +14,7 @@ class SplunkClient:
         self.service = splunk_client.connect(
             host=os.getenv("SPLUNK_HOST", "localhost"),
             port=int(os.getenv("SPLUNK_PORT", 8089)),
-            username=os.getenv("SPLUNK_USERNAME", "admin"),
+            username=os.getenv("SPLUNK_USER", os.getenv("SPLUNK_USERNAME", "admin")),
             password=os.getenv("SPLUNK_PASSWORD", "changeme"),
             scheme="https",
         )

@@ -1,12 +1,14 @@
 import type { InvestigationReport, SPLResult } from "./types";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+// Same-origin /api/* is proxied to the backend via next.config.mjs rewrites.
+// BACKEND_URL is read at runtime on the Next server (Cloud Run env var).
+const API_BASE = "";
 
 export async function queryNaturalLanguage(
   message: string,
   timeRange = "-24h"
 ): Promise<SPLResult> {
-  const res = await fetch(`${BASE_URL}/api/query`, {
+  const res = await fetch(`${API_BASE}/api/query`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message, time_range: timeRange }),
@@ -20,7 +22,7 @@ export async function investigateEntity(
   entityType: string,
   timeRange = "-24h"
 ): Promise<InvestigationReport> {
-  const res = await fetch(`${BASE_URL}/api/investigate`, {
+  const res = await fetch(`${API_BASE}/api/investigate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -40,7 +42,7 @@ export interface HealthResponse {
 }
 
 export async function getHealth(): Promise<HealthResponse> {
-  const res = await fetch(`${BASE_URL}/api/health`);
+  const res = await fetch(`${API_BASE}/api/health`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
