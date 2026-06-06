@@ -16,6 +16,7 @@ import {
   inferCurrentPhase,
   type IRPhase,
 } from "./InvestigationWorkflow";
+import { ReportSectionNav } from "./ReportSectionNav";
 
 type AutomationAction = {
   id: string;
@@ -188,6 +189,7 @@ export function InvestigationReportView({ report }: { report: Report }) {
   const [impactSnapshot, setImpactSnapshot] = useState<ImpactSnapshot | null>(null);
   const [copiedJudgeSummary, setCopiedJudgeSummary] = useState(false);
   const [irPhaseManual, setIrPhaseManual] = useState<IRPhase | null>(null);
+  const [activeSection, setActiveSection] = useState("report-overview");
   const evidence = summarizeEvidence(report);
   const traceability = buildEvidenceTrace(report);
   const confidenceScore = computeConfidence(evidence);
@@ -356,8 +358,13 @@ export function InvestigationReportView({ report }: { report: Report }) {
   };
 
   return (
-    <div className="space-y-8 overflow-y-auto pb-8">
-      <header className="border-b border-soc-border pb-6">
+    <div className="space-y-8 pb-8">
+      <ReportSectionNav activeId={activeSection} onSelect={setActiveSection} />
+
+      <header
+        id="report-overview"
+        className="scroll-mt-24 border-b border-soc-border pb-6"
+      >
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-xl font-bold text-white">{report.entity}</h2>
           <span className="rounded bg-white/10 px-2 py-0.5 text-xs uppercase text-gray-400">
@@ -612,17 +619,33 @@ export function InvestigationReportView({ report }: { report: Report }) {
         </div>
       </section>
 
-      <section className="rounded-lg bg-soc-panel/80 p-4">
+      <section
+        id="report-summary"
+        className="scroll-mt-24 rounded-lg bg-soc-panel/80 p-4"
+      >
         <h3 className="text-sm font-medium uppercase tracking-wide text-gray-500">
           Summary
         </h3>
         <p className="mt-2 leading-relaxed text-gray-200">{report.summary}</p>
+      </section>
+
+      <section
+        id="report-queries"
+        className="scroll-mt-24 rounded-lg border border-soc-border bg-soc-panel/70 p-4"
+      >
+        <h3 className="text-sm font-medium uppercase tracking-wide text-gray-500">
+          Queries Run
+        </h3>
+        <p className="mt-2 text-sm text-gray-400">
+          Deterministic SPL playbook for {report.entity_type} entities — auditable
+          and repeatable.
+        </p>
         <button
           type="button"
           onClick={() => setQueriesOpen(!queriesOpen)}
-          className="mt-4 text-sm text-blue-400 hover:underline"
+          className="mt-3 text-sm text-blue-400 hover:underline"
         >
-          Queries run: {report.queries_run.length}
+          {report.queries_run.length} queries
           {queriesOpen ? " (hide)" : " (show)"}
         </button>
         {queriesOpen && (
@@ -636,11 +659,24 @@ export function InvestigationReportView({ report }: { report: Report }) {
             ))}
           </ul>
         )}
+        {!queriesOpen && report.queries_run.length > 0 && (
+          <pre className="mt-3 overflow-x-auto rounded bg-black/40 p-2 font-mono text-xs text-gray-400">
+            {report.queries_run[0]}
+          </pre>
+        )}
       </section>
 
-      <AttackTimeline events={report.timeline} />
-      <MitreCards techniques={report.mitre_techniques} />
-      <RemediationList steps={report.remediation_steps} />
+      <section id="report-timeline" className="scroll-mt-24">
+        <AttackTimeline events={report.timeline} />
+      </section>
+
+      <section id="report-mitre" className="scroll-mt-24">
+        <MitreCards techniques={report.mitre_techniques} />
+      </section>
+
+      <section id="report-remediation" className="scroll-mt-24">
+        <RemediationList steps={report.remediation_steps} />
+      </section>
 
       <section className="rounded-lg border border-soc-border bg-soc-panel/60 p-4">
         <h3 className="text-sm font-medium uppercase tracking-wide text-gray-400">

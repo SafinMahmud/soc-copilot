@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ChatPanel } from "./components/ChatPanel";
+import { InvestigationLoadingPanel } from "./components/InvestigationLoadingPanel";
 import { InvestigationReportView } from "./components/InvestigationReport";
 import { QueryResult } from "./components/QueryResult";
 import { getHealth, investigateEntity, queryNaturalLanguage } from "@/lib/api";
@@ -42,6 +43,10 @@ export default function Home() {
   const [aiModel, setAiModel] = useState("fdtn-ai/Foundation-Sec-1.1-8B-Instruct:featherless-ai");
   const [reportHistory, setReportHistory] = useState<ReportHistoryItem[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [pendingInvestigation, setPendingInvestigation] = useState<{
+    entity: string;
+    entityType: string;
+  } | null>(null);
 
   const addMessage = useCallback((msg: ChatMessage) => {
     setMessages((prev) => [...prev, msg]);
@@ -75,6 +80,12 @@ export default function Home() {
     try {
       if (intent.mode === "investigate" && intent.entity && intent.entityType) {
         setMobileTab("report");
+        setCurrentResult(null);
+        setInvestigationReport(null);
+        setPendingInvestigation({
+          entity: intent.entity,
+          entityType: intent.entityType,
+        });
         addMessage({
           id: crypto.randomUUID(),
           role: "assistant",
@@ -139,6 +150,7 @@ export default function Home() {
       });
     } finally {
       setIsLoading(false);
+      setPendingInvestigation(null);
     }
   };
 
@@ -243,7 +255,14 @@ export default function Home() {
             </div>
           )}
 
-          {isLoading && currentResult === null && (
+          {isLoading && pendingInvestigation && (
+            <InvestigationLoadingPanel
+              entity={pendingInvestigation.entity}
+              entityType={pendingInvestigation.entityType}
+            />
+          )}
+
+          {isLoading && !pendingInvestigation && currentResult === null && (
             <div className="space-y-3 animate-pulse">
               <div className="h-6 w-1/3 rounded bg-white/10" />
               <div className="h-32 rounded bg-white/10" />
