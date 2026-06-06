@@ -39,8 +39,10 @@ export default function Home() {
   const [inputMode, setInputMode] = useState<InputMode>("query");
   const [error, setError] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<"chat" | "report">("chat");
-  const [aiProvider, setAiProvider] = useState("hf");
-  const [aiModel, setAiModel] = useState("fdtn-ai/Foundation-Sec-1.1-8B-Instruct:featherless-ai");
+  const [aiProvider, setAiProvider] = useState("ollama");
+  const [aiModel, setAiModel] = useState(
+    "hf.co/mradermacher/Foundation-Sec-8B-Instruct-GGUF:Q4_K_M"
+  );
   const [reportHistory, setReportHistory] = useState<ReportHistoryItem[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [pendingInvestigation, setPendingInvestigation] = useState<{

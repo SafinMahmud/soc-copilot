@@ -12,6 +12,19 @@ const STARTER_PROMPTS = [
   "Investigate host Safins-MacBook-Air.local",
 ];
 
+function aiProviderLabel(provider: string): string {
+  if (provider === "mock") return "Mock";
+  if (provider === "ollama") return "Foundation-Sec";
+  if (provider === "hf") return "HF Model";
+  return provider;
+}
+
+function aiProviderBadgeClass(provider: string): string {
+  if (provider === "mock") return "bg-amber-600/20 text-amber-300";
+  if (provider === "ollama") return "bg-purple-600/20 text-purple-200";
+  return "bg-emerald-600/20 text-emerald-300";
+}
+
 export function ChatPanel({
   messages,
   onSend,
@@ -62,13 +75,11 @@ export function ChatPanel({
           <span
             className={clsx(
               "rounded-full px-2.5 py-0.5 text-xs font-medium",
-              aiProvider === "mock"
-                ? "bg-amber-600/20 text-amber-300"
-                : "bg-emerald-600/20 text-emerald-300"
+              aiProviderBadgeClass(aiProvider)
             )}
             title={aiModel}
           >
-            AI: {aiProvider === "mock" ? "Mock" : "HF Model"}
+            AI: {aiProviderLabel(aiProvider)}
           </span>
           <span
             className={clsx(
