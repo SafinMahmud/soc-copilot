@@ -1,98 +1,85 @@
-# SOC Copilot - Project Story
+# SOC Copilot
 
-**Splunk AI Hackathon - Security Track**
+**Splunk AI Hackathon, Security Track**
 
-## Inspiration
+---
 
-SOC analysts spend hours on work that is necessary but repetitive: writing SPL, running isolated searches, pivoting across auth and network logs, and manually turning raw events into something actionable. That usually means a severity rating, a timeline, MITRE mapping, and remediation steps.
+**Inspiration**
 
-I built **SOC Copilot** to compress that workflow without sacrificing trust. The goal was never "an AI that guesses attacks." It was an assistant that **queries Splunk first**, uses real evidence from the SIEM, and applies AI only where it adds clear value: synthesizing findings into a structured incident report analysts can review and act on.
+SOC analysts waste hours on repetitive work: writing SPL, running isolated searches, pivoting across logs, and manually assembling incident reports. The problem is not the analysis itself, it is the overhead before any real thinking happens.
 
-Splunk's **Foundation-Sec** model family was a natural fit. Security-tuned AI should sit on top of real log data, not replace it. That principle guided every design decision in the project.
+SOC Copilot compresses that overhead. It queries Splunk first, builds evidence from real SIEM data, and uses AI only where it earns its place: synthesizing findings into a structured report analysts can act on immediately. Splunk's Foundation-Sec model family was the right fit for that principle. Security-tuned AI belongs on top of real log data, not as a replacement for it.
 
-## What it does
+---
 
-SOC Copilot is a chat-style investigation assistant with two modes:
+**What It Does**
 
-**Query mode.** Analysts ask questions in plain English (e.g. "show top sourcetypes in the last 24 hours" or "show failed logins"). The backend converts the request to Splunk SPL, executes it against live indexes, and returns transparent results with the exact query shown.
+Two modes, one chat interface.
 
-**Investigate mode.** Analysts name a suspicious entity: an IP, user, or hostname (e.g. "Investigate IP 23.20.239.12"). The system runs an autonomous, deterministic Splunk playbook: correlated searches for authentication failures, successful logins, network activity, and raw evidence. **Foundation-Sec** (via Ollama) then produces a structured report:
+**Query mode.** Plain-English questions ("show failed logins in the last 24 hours") get converted to SPL, executed against live indexes, and returned with the exact query shown. No black box.
 
-- Severity rating and rationale
-- Executive summary
-- Chronological attack timeline
-- MITRE ATT&CK technique mapping
-- Prioritized remediation playbook
+**Investigate mode.** Analysts name a suspicious entity: IP, user, or hostname. The backend runs a deterministic Splunk playbook across auth, network, and raw event indexes. Foundation-Sec then synthesizes a structured incident report covering severity rating, executive summary, chronological attack timeline, MITRE ATT&CK mapping, and a prioritized remediation playbook.
 
-All evidence comes from Splunk indexes (`botsv3`, `main`) with BOTS v3-style telemetry: Windows security events, network flows, web logs, and Linux authentication. The AI interprets what Splunk returns; it does not invent attack data.
+All evidence comes from Splunk. The AI interprets it; it does not invent it.
 
-**Live demo:** https://soc-frontend-v5upnophmq-uc.a.run.app  
-**Demo video:** https://youtu.be/RzBp3Caarh8
+Live demo: [https://soc-frontend-v5upnophmq-uc.a.run.app](https://soc-frontend-v5upnophmq-uc.a.run.app) Demo video: [https://youtu.be/RzBp3Caarh8](https://youtu.be/RzBp3Caarh8)
 
-## How I built it
+---
+
+**How I Built It**
 
 ```
-Browser → Next.js (Cloud Run) → FastAPI (Cloud Run) → Splunk Enterprise (:8089)
-                                                    → Ollama / Foundation-Sec (:11434)
+Browser → Next.js (Cloud Run) → FastAPI (Cloud Run) → Splunk Enterprise
+                                                     → Ollama / Foundation-Sec
+
 ```
 
-**Frontend (Next.js)**  
-Chat UI, query results table, and a structured investigation report with timeline, MITRE cards, remediation list, and section navigation. A same-origin API proxy forwards `/api/*` to the backend so production never hardcodes localhost.
+The Next.js frontend handles the chat UI, query results table, and structured report rendering (timeline, MITRE cards, remediation steps, section navigation). A same-origin API proxy keeps backend URLs out of the client bundle.
 
-**Backend (FastAPI)**  
-REST endpoints: `/api/query`, `/api/investigate`, `/api/health`. Splunk access uses the official SDK on the management API. The investigation agent runs a fixed, repeatable SPL plan (auditable, not LLM-chosen). Raw findings go to Foundation-Sec for JSON synthesis. Deterministic fallbacks keep the app working when the LLM is cold or unavailable.
+The FastAPI backend exposes three endpoints: `/api/query`, `/api/investigate`, `/api/health`. Splunk access uses the official SDK against the management API. The investigation playbook is fixed and repeatable, not LLM-chosen, making it auditable by design. Raw findings go to Foundation-Sec for JSON synthesis, with deterministic fallbacks when the model is unavailable.
 
-**Data & infrastructure**  
-Splunk Enterprise on a private GCE VM holds security telemetry. Ollama on a separate VM hosts Foundation-Sec 8B (GGUF). Cloud Run reaches both through a VPC connector. A sample data generator (`data/generate_sample_data.py`) seeds a brute-force demo scenario. Cloud Scheduler stops the LLM VM when idle to control cost.
+Infrastructure runs on GCP: Splunk Enterprise on a private GCE VM, Ollama on a separate VM hosting Foundation-Sec 8B (GGUF), Cloud Run reaching both via VPC connector. To cut latency, the backend warms the Ollama VM in parallel with Splunk queries, so cold-start wait is the longer of the two, not the sum.
 
-To cut investigate latency, the backend warms the Ollama VM while Splunk queries run at the same time. On a cold start, total wait is closer to whichever step finishes last (Splunk or the LLM), not the sum of both.
+---
 
-See [architecture_diagram.md](./architecture_diagram.md) for the full Mermaid diagram and data-flow documentation.
+**Challenges**
 
-## Challenges I ran into
+**Splunk auth in production.** Worked locally, failed on Cloud Run with `Session is not logged in` on every request. Required fixing secret binding and adding session reconnect logic before the live demo was stable.
 
-**Splunk auth in production**  
-Locally everything worked. On Cloud Run, every query initially failed with `Session is not logged in`. I had to fix the password secret binding and session reconnect logic before the live demo was credible.
+**Evidence-first synthesis.** Early fallback logic still produced MITRE mappings and remediation steps when Splunk returned no events, which looked confident and was wrong. Reworked the synthesis layer so no Splunk rows means no attack claims, period.
 
-**Empty data vs. convincing UI**  
-When Splunk returned no events, fallback logic still showed MITRE techniques like brute force and remediation steps, with an empty or placeholder timeline. That was confusing and untrustworthy. I reworked synthesis to be evidence-driven: no Splunk rows means no attack claims.
+**Timeline consistency.** Foundation-Sec sometimes returned an empty timeline despite valid Splunk results, or pulled in audit-index noise instead of attack events. Fixed with tighter index filters and a Splunk-row backfill when the model omits timeline entries.
 
-**Timeline inconsistency**  
-Foundation-Sec sometimes returned an empty timeline while Splunk had results. Other runs pulled in Splunk audit noise instead of real attack events. I narrowed index filters, removed audit-index pollution from entity searches, and backfilled timelines from Splunk rows when the model omitted them.
+**Cost control.** VPC connectors, persistent VMs, and GPU inference add up fast. Used scale-to-zero Cloud Run, on-demand LLM VM start, and scheduled idle shutdown to stay within hackathon budget, accepting some cold-start latency as the tradeoff.
 
-**Cold-start latency**  
-The first investigate after the Ollama VM boots can take several minutes. Background VM warm-up, health checks, and a demo runbook ("warm one investigate off-camera") made live recording practical.
+---
 
-**Cost vs. reliability**  
-VPC connectors, always-on VMs, and GPU inference add up quickly. I used scale-to-zero Cloud Run, on-demand LLM VM start, and scheduled idle shutdown. That meant accepting some cold-start pain to stay within a hackathon budget.
+**What I'm Proud Of**
 
-## Accomplishments I'm proud of
+- A fully connected GCP deployment: frontend, backend, Splunk, and Foundation-Sec over a private VPC, live and working
+- Deterministic investigation playbook with transparent SPL, not a prompt-driven agent guessing queries
+- Honest failure modes: when Splunk has no data, the app says so instead of fabricating an incident
+- Open-source ready: MIT license, README, architecture diagram, env examples, sample data generator, demo runbook
 
-- A **live, end-to-end deployment** on GCP: frontend, backend, Splunk, and Foundation-Sec connected over a private VPC
-- **Splunk-native evidence** with transparent SPL in query mode and a deterministic, auditable investigation playbook
-- **Foundation-Sec integration** for real security report synthesis, not a generic chatbot wrapper
-- A **structured analyst UX** with severity, summary, queries run, timeline, MITRE, remediation, loading states, and report navigation
-- **Open-source submission readiness**: MIT license, README, architecture diagram, env examples, sample data generator, and demo runbook
-- **Honest failure modes**. When Splunk has no data, the app says so instead of fabricating an incident
+---
 
-## What I learned
+**What I Learned**
 
-**Splunk should own the evidence layer.** Investigation queries are deterministic; the LLM synthesizes after the fact. That separation makes the system more trustworthy and easier to debug.
+Splunk owns the evidence layer. The LLM synthesizes after the fact. That separation is what makes the system trustworthy and debuggable.
 
-**AI demos fail for operational reasons, not just model reasons.** Secrets, VPC routing, session expiry, and empty indexes broke demos before the model ever got involved.
+AI demos fail for operational reasons before they fail for model reasons. Secrets, VPC routing, session expiry, and empty indexes caused every near-miss in this project.
 
-**Security UX needs structure.** Analysts want predictable report sections and visible SPL, not a wall of unstructured text.
+Production is half platform engineering. Cloud Run, Secret Manager, VPC connectors, and cost controls mattered as much as the application code.
 
-**Production is half platform engineering.** Cloud Run, GCE, Secret Manager, VPC connectors, and cost controls matter as much as the application code for a credible hackathon submission.
+---
 
-## What's next for soc-copilot
+**What's Next**
 
-- **Richer entity pivoting**: automatic follow-up queries when the agent finds related users, hosts, or parent processes
-- **Case management hooks**: export reports to ticketing/SOAR (ServiceNow, Jira, Splunk SOAR)
-- **Analyst feedback loop**: thumbs up/down on report sections to tune prompts and severity calibration
-- **BOTS v3 deep integration**: pre-built playbooks aligned to known BOTS attack scenarios and datasets
-- **Streaming synthesis**: progressive report rendering as Splunk queries complete, instead of waiting for the full pipeline
-- **Multi-tenant Splunk**: support multiple indexes/tenants and role-based query scoping for enterprise deployments
+- Entity pivoting: automatic follow-up queries when the agent finds related users, hosts, or processes
+- SOAR/ticketing export: push reports to ServiceNow, Jira, or Splunk SOAR
+- Streaming synthesis: progressive report rendering as Splunk queries complete
+- Analyst feedback loop: thumbs up/down on report sections to tune severity calibration
+- Multi-tenant support: multiple indexes and role-based query scoping for enterprise deployments
 
 ---
 
