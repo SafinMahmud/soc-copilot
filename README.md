@@ -31,7 +31,7 @@ Built for Splunk environments with **Foundation-Sec** (Splunk’s security-tuned
 |-------------|----------|
 | Open source license (MIT) | [LICENSE](./LICENSE) |
 | Source code | `backend/`, `frontend/` |
-| Setup and run instructions | This README + [DEMO_RUNBOOK.md](./DEMO_RUNBOOK.md) |
+| Setup and run instructions | This README (Quick start section) |
 | Dependencies | [backend/requirements.txt](./backend/requirements.txt), [frontend/package.json](./frontend/package.json), [data/requirements.txt](./data/requirements.txt) |
 | Example configuration | [backend/.env.example](./backend/.env.example), [frontend/.env.local.example](./frontend/.env.local.example) |
 | Example dataset generator | [data/generate_sample_data.py](./data/generate_sample_data.py) |
@@ -149,8 +149,7 @@ soc-copilot/
 ├── README.md
 ├── backend/             # FastAPI + Splunk SDK + agent
 ├── frontend/            # Next.js UI
-├── data/                # Sample HEC data generator
-└── DEMO_RUNBOOK.md      # Step-by-step demo guide
+└── data/                # Sample HEC data generator
 ```
 
 ## Dependencies
