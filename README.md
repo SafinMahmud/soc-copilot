@@ -48,9 +48,19 @@ See **[architecture.md](./architecture.md)** for the required diagram (Mermaid +
 ## Demo
 
 - **Live app:** https://soc-frontend-v5upnophmq-uc.a.run.app  
-- **Demo video:** *[Add your YouTube/Vimeo/Youku link before submission]*
+- **Demo video:** https://youtu.be/RzBp3Caarh8
 
 **Before demo:** ensure Splunk and (for investigate) Ollama VMs are running if using the GCP deployment.
+
+## Project description
+
+SOC Copilot is an AI-powered security investigation assistant built for the Splunk AI Hackathon. It helps SOC analysts move from raw logs to actionable incident reports in minutes instead of hours.
+
+Analysts interact through a chat-style web UI in two modes. In **query mode**, they ask questions in plain English—such as “show top sourcetypes in the last 24 hours”—and the backend converts the request to Splunk SPL, runs it against live indexes, and returns transparent results with the exact query shown. In **investigate mode**, they name a suspicious entity—an IP, user, or hostname—and the system runs an autonomous, deterministic investigation playbook: correlated Splunk searches for authentication failures, successful logins, network activity, and raw evidence. Those findings are then synthesized by **Foundation-Sec**, Splunk’s security-tuned language model (via Ollama), into a structured incident report with severity rating, executive summary, chronological attack timeline, MITRE ATT&CK technique mapping, and a prioritized remediation playbook.
+
+All evidence comes from real Splunk data—primarily **BOTS v3**-style telemetry in `botsv3` and `main` indexes, including Windows security events, network flows, web logs, and Linux authentication. The AI does not invent attack data; it interprets what Splunk returns. The architecture separates concerns cleanly: Splunk is the source of truth, the FastAPI backend orchestrates queries and agents, and Foundation-Sec handles natural-language synthesis. The stack deploys on GCP with a Next.js frontend and FastAPI backend on Cloud Run, Splunk Enterprise on a private VM, and Ollama hosting Foundation-Sec in the same VPC—with cost-aware auto-stop for idle LLM infrastructure.
+
+Open source under MIT. Full setup instructions, sample data generator, and architecture diagram are included in this repository.
 
 ## Requirements
 
