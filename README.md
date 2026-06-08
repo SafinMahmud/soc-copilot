@@ -25,9 +25,25 @@ Built for Splunk environments with **Foundation-Sec** (Splunk’s security-tuned
 | Demo-safe fallbacks | `AI_PROVIDER=mock` and template SPL when LLM is unavailable |
 | GCP deployment | Cloud Run frontend/backend, Splunk + Ollama on GCE, cost-aware VM auto-stop |
 
+## Hackathon submission checklist
+
+| Requirement | Location |
+|-------------|----------|
+| Open source license (MIT) | [LICENSE](./LICENSE) |
+| Source code | `backend/`, `frontend/` |
+| Setup and run instructions | This README + [DEMO_RUNBOOK.md](./DEMO_RUNBOOK.md) |
+| Dependencies | [backend/requirements.txt](./backend/requirements.txt), [frontend/package.json](./frontend/package.json), [data/requirements.txt](./data/requirements.txt) |
+| Example configuration | [backend/.env.example](./backend/.env.example), [frontend/.env.local.example](./frontend/.env.local.example) |
+| Example dataset generator | [data/generate_sample_data.py](./data/generate_sample_data.py) |
+| Architecture diagram (repo root) | [architecture.md](./architecture.md) — Splunk integration, AI/agent flow, service data paths |
+
 ## Architecture
 
-See **[architecture.md](./architecture.md)** for the full diagram (Mermaid + ASCII), Splunk integration, AI/agent flow, and data paths between browser, API, Splunk, and Ollama.
+See **[architecture.md](./architecture.md)** for the required diagram (Mermaid + ASCII) showing:
+
+- How the app queries Splunk via the management API (`8089`)
+- How Foundation-Sec (Ollama) synthesizes investigation reports
+- Data flow: browser → Next.js → FastAPI → Splunk / Ollama
 
 ## Demo
 
@@ -76,11 +92,32 @@ npm run dev
 
 Open http://localhost:3000
 
+## Data sources
+
+Evidence is read from Splunk indexes **`botsv3`** and **`main`** (BOTS v3 recommended):
+
+| Source | Sourcetype | Fields used |
+|--------|------------|-------------|
+| Windows authentication | `WinEventLog:Security` | `EventCode` 4625/4624, `src_ip`, `user`, `dest` |
+| Network flows | `stream:tcp` | `src_ip`, `dest_ip`, `dest_port`, `bytes_in`, `bytes_out` |
+| Web access | `iis` | `c_ip`, `cs_uri_stem`, `sc_status` |
+| Linux authentication | `linux_secure` | `user`, `src`, `action` |
+
+Load data with [BOTS v3](https://github.com/splunk/botsv3) or run `python data/generate_sample_data.py` (synthetic brute-force scenario for IP `23.20.239.12`).
+
 ## Usage examples
 
-1. **Query:** `Show top sourcetypes in the last 24 hours`
-2. **Investigate:** `Investigate IP 23.20.239.12`
-3. **Investigate:** `Investigate user administrator`
+**Query mode** (ad-hoc Splunk questions):
+
+- `Show top sourcetypes in the last 24 hours`
+- `Show recent events`
+- `Show failed logins in the last 24 hours`
+
+**Investigate mode** (autonomous entity investigation):
+
+- `Investigate IP 23.20.239.12`
+- `Investigate user administrator`
+- `Investigate host wrk-splunk`
 
 ## AI providers
 

@@ -298,11 +298,8 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any], time_range: str = "
 def _mock_index_filter(index: str) -> str:
     configured = (index or "").strip()
     if configured:
-        return (
-            f"(index={configured} OR index=main OR index=botsv3 "
-            "OR index=_internal OR index=_audit)"
-        )
-    return "(index=main OR index=botsv3 OR index=_internal OR index=_audit)"
+        return f"(index={configured} OR index=main OR index=botsv3)"
+    return "(index=main OR index=botsv3)"
 
 
 def _run_query_with_fallbacks(
@@ -437,11 +434,6 @@ def _deterministic_investigation_plan(
                 f'search {idx_filter} earliest=-90d (src_ip="{entity}" OR dest_ip="{entity}" OR c_ip="{entity}" OR src="{entity}") (stream OR tcp OR network OR dest_port) | sort 0 - _time | head 200',
             ),
             (
-                "Audit trail actions from IP",
-                f'search index=_audit earliest={time_range} (src="{entity}" OR c_ip="{entity}" OR src_ip="{entity}") | stats count by user action info app | sort - count | head 100',
-                f'search index=_audit earliest=-90d (src="{entity}" OR c_ip="{entity}" OR src_ip="{entity}") | stats count by user action info app | sort - count | head 100',
-            ),
-            (
                 "Recent raw events for entity evidence",
                 f'search {idx_filter} earliest={time_range} ("{entity}") | table _time host source sourcetype user action src src_ip c_ip dest_ip EventCode bytes_in bytes_out | sort 0 - _time | head 120',
                 f'search {idx_filter} earliest=-90d ("{entity}") | table _time host source sourcetype user action src src_ip c_ip dest_ip EventCode bytes_in bytes_out | sort 0 - _time | head 120',
@@ -543,27 +535,67 @@ def _extract_timestamp(row: Dict[str, Any]) -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _mock_synthesize_report(
-    entity: str, entity_type: str, agent_output: Dict[str, Any]
-) -> Dict[str, Any]:
-    raw_findings = agent_output["raw_findings"]
-    timeline = []
-    failure_count = 0
-    success_count = 0
-    transfer_count = 0
+def _is_audit_noise_row(row: Dict[str, Any]) -> bool:
+    row_text = json.dumps(row, default=str).lower()
+    if (
+        "action=search" in row_text
+        or "search_id=" in row_text
+        or row.get("index") == "_audit"
+        or row.get("sourcetype") == "audittrail"
+        or row.get("source") == "audittrail"
+    ):
+        return True
+    # Aggregated audit stats are not attack evidence.
+    if "count" in row and not any(
+        key in row for key in ("EventCode", "src_ip", "src", "c_ip", "bytes_out")
+    ):
+        return True
+    return False
+
+
+def _summarize_findings(agent_output: Dict[str, Any]) -> Dict[str, int]:
+    raw_findings = agent_output.get("raw_findings") or {}
+    summary = {
+        "query_count": 0,
+        "error_count": 0,
+        "evidence_rows": 0,
+        "failure_count": 0,
+        "success_count": 0,
+        "transfer_count": 0,
+    }
     for query in raw_findings.values():
-        description = query.get("description", "Investigation event")
-        for row in (query.get("results") or [])[:8]:
-            if not isinstance(row, dict) or "error" in row:
+        if not isinstance(query, dict):
+            continue
+        summary["query_count"] += 1
+        for row in query.get("results") or []:
+            if not isinstance(row, dict):
                 continue
+            if "error" in row:
+                summary["error_count"] += 1
+                continue
+            if _is_audit_noise_row(row):
+                continue
+            summary["evidence_rows"] += 1
             row_text = json.dumps(row, default=str).lower()
             if "4625" in row_text or '"failure"' in row_text:
-                failure_count += 1
+                summary["failure_count"] += 1
             if "4624" in row_text or '"success"' in row_text:
-                success_count += 1
+                summary["success_count"] += 1
             if "bytes_out" in row and str(row.get("bytes_out", "0")).isdigit():
                 if int(row.get("bytes_out", 0)) > 1_000_000:
-                    transfer_count += 1
+                    summary["transfer_count"] += 1
+    return summary
+
+
+def _build_timeline_from_findings(agent_output: Dict[str, Any]) -> List[Dict[str, Any]]:
+    timeline: List[Dict[str, Any]] = []
+    for query in (agent_output.get("raw_findings") or {}).values():
+        if not isinstance(query, dict):
+            continue
+        description = query.get("description", "Investigation event")
+        for row in (query.get("results") or [])[:8]:
+            if not isinstance(row, dict) or "error" in row or _is_audit_noise_row(row):
+                continue
             event_type = _infer_event_type(description, row)
             timeline.append(
                 {
@@ -574,18 +606,77 @@ def _mock_synthesize_report(
                     "severity": "high" if event_type == "auth" else "medium",
                 }
             )
+    timeline.sort(key=lambda item: item["timestamp"])
+    return timeline[:40]
 
-    timeline.sort(key=lambda x: x["timestamp"])
-    if not timeline:
-        timeline = [
+
+def _insufficient_evidence_report(
+    entity: str, entity_type: str, agent_output: Dict[str, Any]
+) -> Dict[str, Any]:
+    stats = _summarize_findings(agent_output)
+    query_count = stats["query_count"]
+    error_count = stats["error_count"]
+
+    if query_count > 0 and error_count == query_count:
+        summary = (
+            f"Splunk queries for {entity_type} '{entity}' could not be completed "
+            f"({error_count}/{query_count} failed). Check Splunk connectivity and credentials."
+        )
+        severity_rationale = "Severity is low because no log evidence was retrieved."
+        remediation_steps = [
             {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "event_type": "network",
-                "description": "No matching events found in current index/time range.",
-                "raw_log": "{}",
-                "severity": "low",
-            }
+                "priority": "High",
+                "action": "Verify Splunk host, credentials, and index coverage before re-running.",
+                "rationale": "Investigation conclusions require queryable security telemetry.",
+            },
+            {
+                "priority": "Medium",
+                "action": "Confirm botsv3/main indexes contain events for the investigated entity.",
+                "rationale": "Empty indexes produce no attack timeline or corroborating evidence.",
+            },
         ]
+    else:
+        summary = (
+            f"No matching security events were found for {entity_type} '{entity}' "
+            f"in the configured indexes and time range."
+        )
+        severity_rationale = (
+            "Severity is low because no corroborating attack activity was observed in Splunk."
+        )
+        remediation_steps = [
+            {
+                "priority": "Medium",
+                "action": "Validate data ingest and expand the search window if the entity is expected.",
+                "rationale": "Absence of evidence may reflect coverage gaps rather than a benign entity.",
+            },
+            {
+                "priority": "Low",
+                "action": "Re-run after confirming the entity value and relevant sourcetypes are indexed.",
+                "rationale": "Keeps triage open without assuming a specific attack technique.",
+            },
+        ]
+
+    return {
+        "severity": "Low",
+        "severity_rationale": severity_rationale,
+        "summary": summary,
+        "timeline": [],
+        "mitre_techniques": [],
+        "remediation_steps": remediation_steps,
+    }
+
+
+def _mock_synthesize_report(
+    entity: str, entity_type: str, agent_output: Dict[str, Any]
+) -> Dict[str, Any]:
+    stats = _summarize_findings(agent_output)
+    timeline = _build_timeline_from_findings(agent_output)
+    if stats["evidence_rows"] == 0:
+        return _insufficient_evidence_report(entity, entity_type, agent_output)
+
+    failure_count = stats["failure_count"]
+    success_count = stats["success_count"]
+    transfer_count = stats["transfer_count"]
 
     if failure_count > 20 and success_count > 0:
         severity = "Critical"
@@ -609,20 +700,27 @@ def _mock_synthesize_report(
             "Limited suspicious evidence found in current data and time range."
         )
 
-    mitre_techniques = [
-        {
-            "technique_id": "T1110",
-            "name": "Brute Force",
-            "tactic": "Credential Access",
-            "description": "Repeated failed logins may indicate password guessing attempts.",
-        },
-        {
-            "technique_id": "T1021",
-            "name": "Remote Services",
-            "tactic": "Lateral Movement",
-            "description": "Remote authentication and service access activity observed.",
-        },
-    ]
+    mitre_techniques: List[Dict[str, str]] = []
+    if failure_count > 0:
+        mitre_techniques.append(
+            {
+                "technique_id": "T1110",
+                "name": "Brute Force",
+                "tactic": "Credential Access",
+                "description": "Repeated failed logins may indicate password guessing attempts.",
+            }
+        )
+    if success_count > 0 or any(
+        item.get("event_type") == "network" for item in timeline
+    ):
+        mitre_techniques.append(
+            {
+                "technique_id": "T1021",
+                "name": "Remote Services",
+                "tactic": "Lateral Movement",
+                "description": "Remote authentication and service access activity observed.",
+            }
+        )
     if transfer_count > 0:
         mitre_techniques.append(
             {
@@ -633,26 +731,41 @@ def _mock_synthesize_report(
             }
         )
 
-    remediation_steps = [
-        {
-            "priority": "Critical" if severity in ("Critical", "High") else "High",
-            "action": f"Contain entity {entity} and rotate potentially exposed credentials.",
-            "rationale": "Immediate containment limits attacker dwell time and reuse.",
-        },
-        {
-            "priority": "High",
-            "action": "Block suspicious source IPs and enforce MFA for privileged access.",
-            "rationale": "Reduces ongoing brute-force and unauthorized remote access risk.",
-        },
+    remediation_steps = []
+    if severity in ("Critical", "High"):
+        remediation_steps.append(
+            {
+                "priority": "Critical" if severity == "Critical" else "High",
+                "action": f"Contain entity {entity} and rotate potentially exposed credentials.",
+                "rationale": "Immediate containment limits attacker dwell time and reuse.",
+            }
+        )
+    if failure_count > 0:
+        remediation_steps.append(
+            {
+                "priority": "High",
+                "action": "Block suspicious source IPs and enforce MFA for privileged access.",
+                "rationale": "Reduces ongoing brute-force and unauthorized remote access risk.",
+            }
+        )
+    if transfer_count > 0:
+        remediation_steps.append(
+            {
+                "priority": "High",
+                "action": "Review large outbound transfers and isolate affected hosts.",
+                "rationale": "Helps confirm or rule out data exfiltration activity.",
+            }
+        )
+    remediation_steps.append(
         {
             "priority": "Medium",
             "action": "Increase detections for repeated auth failures and anomalous transfers.",
             "rationale": "Improves early detection of similar attack patterns.",
-        },
-    ]
+        }
+    )
 
     summary = (
-        f"Mock provider investigation reviewed {len(raw_findings)} query groups for "
+        f"Investigation reviewed {stats['query_count']} query groups for "
         f"{entity_type} '{entity}'. Findings show {failure_count} suspicious auth failures, "
         f"{success_count} successful auth events, and {transfer_count} potential transfer indicators."
     )
@@ -661,7 +774,7 @@ def _mock_synthesize_report(
         "severity": severity,
         "severity_rationale": severity_rationale,
         "summary": summary,
-        "timeline": timeline[:40],
+        "timeline": timeline,
         "mitre_techniques": mitre_techniques[:6],
         "remediation_steps": remediation_steps,
     }
@@ -777,6 +890,12 @@ def synthesize_report(
         queries_run=json.dumps(agent_output["queries_run"], indent=2),
         raw_findings=json.dumps(agent_output["raw_findings"], indent=2),
     )
+    stats = _summarize_findings(agent_output)
+    if stats["evidence_rows"] == 0:
+        return _normalize_report_json(
+            _insufficient_evidence_report(entity, entity_type, agent_output)
+        )
+
     try:
         response_text = _llm_generate(
             user_prompt=prompt,
@@ -784,9 +903,17 @@ def synthesize_report(
             max_tokens=4096,
             temperature=0.1,
         )
-        return _normalize_report_json(_extract_json_object(response_text))
+        report = _normalize_report_json(_extract_json_object(response_text))
+        if not report.get("timeline"):
+            report["timeline"] = _build_timeline_from_findings(agent_output)
+        if stats["failure_count"] == 0 and stats["transfer_count"] == 0:
+            report["mitre_techniques"] = [
+                item
+                for item in report.get("mitre_techniques", [])
+                if item.get("technique_id") not in {"T1110", "T1048"}
+            ]
+        return report
     except Exception:
-        # Keep investigations functional when HF synthesis is unavailable.
         return _normalize_report_json(
             _mock_synthesize_report(entity, entity_type, agent_output)
         )
