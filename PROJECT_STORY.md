@@ -45,13 +45,7 @@ REST endpoints: `/api/query`, `/api/investigate`, `/api/health`. Splunk access u
 **Data & infrastructure**  
 Splunk Enterprise on a private GCE VM holds security telemetry. Ollama on a separate VM hosts Foundation-Sec 8B (GGUF). Cloud Run reaches both through a VPC connector. A sample data generator (`data/generate_sample_data.py`) seeds a brute-force demo scenario. Cloud Scheduler stops the LLM VM when idle to control cost.
 
-To cut investigate latency, the backend warms the Ollama VM in parallel while Splunk queries run:
-
-\[
-T_{\text{investigate}} \approx T_{\text{splunk}} + T_{\text{llm}}
-\]
-
-Parallel warm-up lowers effective wait time on cold starts.
+To cut investigate latency, the backend warms the Ollama VM while Splunk queries run at the same time. On a cold start, total wait is closer to whichever step finishes last (Splunk or the LLM), not the sum of both.
 
 See [architecture_diagram.md](./architecture_diagram.md) for the full Mermaid diagram and data-flow documentation.
 
