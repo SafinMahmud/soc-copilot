@@ -35,7 +35,7 @@ Built for Splunk environments with **Foundation-Sec** (Splunk’s security-tuned
 | Dependencies | [backend/requirements.txt](./backend/requirements.txt), [frontend/package.json](./frontend/package.json), [data/requirements.txt](./data/requirements.txt) |
 | Example configuration | [backend/.env.example](./backend/.env.example), [frontend/.env.local.example](./frontend/.env.local.example) |
 | Example dataset generator | [data/generate_sample_data.py](./data/generate_sample_data.py) |
-| Architecture diagram (repo root) | [architecture_diagram.md](./architecture_diagram.md) — Splunk integration, AI/agent flow, service data paths ([architecture.md](./architecture.md) alias) |
+| Architecture diagram (repo root) | [architecture_diagram.md](./architecture_diagram.md) — Splunk integration, AI/agent flow, service data paths |
 
 ## Architecture
 
@@ -143,8 +143,7 @@ Query endpoint uses **deterministic SPL by default** for speed and stability. Se
 
 ```
 soc-copilot/
-├── architecture_diagram.md # Required architecture diagram (hackathon filename)
-├── architecture.md       # Same content as architecture_diagram.md
+├── architecture_diagram.md # Required architecture diagram
 ├── LICENSE              # MIT
 ├── README.md
 ├── backend/             # FastAPI + Splunk SDK + agent

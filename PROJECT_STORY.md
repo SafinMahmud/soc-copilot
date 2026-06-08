@@ -53,7 +53,7 @@ T_{\text{investigate}} \approx T_{\text{splunk}} + T_{\text{llm}}
 
 Parallel warm-up lowers effective wait time on cold starts.
 
-See [architecture.md](./architecture.md) for the full Mermaid diagram and data-flow documentation.
+See [architecture_diagram.md](./architecture_diagram.md) for the full Mermaid diagram and data-flow documentation.
 
 ## Challenges we ran into
 
