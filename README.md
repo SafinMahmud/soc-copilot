@@ -35,11 +35,11 @@ Built for Splunk environments with **Foundation-Sec** (Splunk’s security-tuned
 | Dependencies | [backend/requirements.txt](./backend/requirements.txt), [frontend/package.json](./frontend/package.json), [data/requirements.txt](./data/requirements.txt) |
 | Example configuration | [backend/.env.example](./backend/.env.example), [frontend/.env.local.example](./frontend/.env.local.example) |
 | Example dataset generator | [data/generate_sample_data.py](./data/generate_sample_data.py) |
-| Architecture diagram (repo root) | [architecture.md](./architecture.md) — Splunk integration, AI/agent flow, service data paths |
+| Architecture diagram (repo root) | [architecture_diagram.md](./architecture_diagram.md) — Splunk integration, AI/agent flow, service data paths ([architecture.md](./architecture.md) alias) |
 
 ## Architecture
 
-See **[architecture.md](./architecture.md)** for the required diagram (Mermaid + ASCII) showing:
+See **[architecture_diagram.md](./architecture_diagram.md)** for the required diagram (Mermaid + ASCII) showing:
 
 - How the app queries Splunk via the management API (`8089`)
 - How Foundation-Sec (Ollama) synthesizes investigation reports
@@ -143,7 +143,8 @@ Query endpoint uses **deterministic SPL by default** for speed and stability. Se
 
 ```
 soc-copilot/
-├── architecture.md      # Required architecture diagram (this repo)
+├── architecture_diagram.md # Required architecture diagram (hackathon filename)
+├── architecture.md       # Same content as architecture_diagram.md
 ├── LICENSE              # MIT
 ├── README.md
 ├── backend/             # FastAPI + Splunk SDK + agent
